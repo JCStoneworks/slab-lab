@@ -286,7 +286,7 @@ const daysBetween = (fromStr, toStr) => {
 export default function SlabInventoryApp() {
   const [loaded, setLoaded] = useState(false);
   const [slabs, setSlabs] = useState([]);
-  const [builders, setBuilders] = useState(["Hartwell Homes", "Ridgeline Builders"]);
+  const [builders, setBuilders] = useState([]);
   const [vendors, setVendors] = useState(["MSI", "Arizona Tile", "Daltile"]);
   const [orders, setOrders] = useState([]);
   const [showCosts, setShowCosts] = useState(false);
@@ -304,6 +304,7 @@ export default function SlabInventoryApp() {
   const [reserveOwner, setReserveOwner] = useState("Shop");
   const [addBuilderOpen, setAddBuilderOpen] = useState(false);
   const [newBuilderName, setNewBuilderName] = useState("");
+  const [confirmDeleteBuilder, setConfirmDeleteBuilder] = useState(null);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
   const [newVendorName, setNewVendorName] = useState("");
   const [formId, setFormId] = useState(null);
@@ -399,7 +400,7 @@ export default function SlabInventoryApp() {
             return next;
           });
           setSlabs(loadedSlabs);
-          setBuilders(parsed.builders && parsed.builders.length ? parsed.builders : ["Hartwell Homes", "Ridgeline Builders"]);
+          setBuilders(parsed.builders || []);
           setVendors(parsed.vendors && parsed.vendors.length ? parsed.vendors : ["MSI", "Arizona Tile", "Daltile"]);
           setOrders(parsed.orders || []);
         }
@@ -1169,6 +1170,14 @@ export default function SlabInventoryApp() {
     setActiveTab(name);
   };
 
+  const deleteBuilder = (name) => {
+    setBuilders((prev) => prev.filter((b) => b !== name));
+    // any slabs owned by this builder move back to Shop stock rather than being deleted
+    setSlabs((prev) => prev.map((s) => (s.owner === name ? { ...s, owner: "Shop" } : s)));
+    if (activeTab === name) setActiveTab("all");
+    setConfirmDeleteBuilder(null);
+  };
+
   const addVendor = () => {
     const name = newVendorName.trim();
     if (!name || vendors.includes(name)) return;
@@ -1353,6 +1362,18 @@ export default function SlabInventoryApp() {
           margin-bottom: -1.5px;
         }
         .tab.active .count { background: var(--brass); color: white; }
+        .tab-remove {
+          background: transparent;
+          border: none;
+          padding: 2px;
+          margin-left: 2px;
+          display: flex;
+          align-items: center;
+          color: var(--stone-soft);
+          cursor: pointer;
+          border-radius: 4px;
+        }
+        .tab-remove:hover { background: rgba(163,66,58,0.15); color: var(--danger); }
         .tab-add {
           color: var(--brass);
           font-size: 13px;
@@ -2072,6 +2093,13 @@ export default function SlabInventoryApp() {
         {builders.map((b) => (
           <div key={b} className={`tab ${activeTab === b ? "active" : ""}`} onClick={() => setActiveTab(b)}>
             <Building2 size={14} /> {b} <span className="count">{counts[b] || 0}</span>
+            <button
+              className="tab-remove"
+              onClick={(e) => { e.stopPropagation(); setConfirmDeleteBuilder(b); }}
+              title={`Remove ${b}`}
+            >
+              <X size={12} />
+            </button>
           </div>
         ))}
         <div className="tab tab-add" onClick={() => setAddBuilderOpen(true)}>
@@ -2327,6 +2355,33 @@ export default function SlabInventoryApp() {
           </div>
         </div>
       )}
+
+      {/* REMOVE BUILDER CONFIRM */}
+      {confirmDeleteBuilder && (() => {
+        const affectedCount = slabs.filter((s) => s.owner === confirmDeleteBuilder).length;
+        return (
+          <div className="overlay" onClick={() => setConfirmDeleteBuilder(null)}>
+            <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Remove {confirmDeleteBuilder}?</h2>
+                <button className="icon-btn" onClick={() => setConfirmDeleteBuilder(null)}><X size={18} /></button>
+              </div>
+              <div className="modal-body">
+                <p style={{ margin: 0, fontSize: 13.5 }}>
+                  This removes {confirmDeleteBuilder}'s tab.
+                  {affectedCount > 0
+                    ? ` ${affectedCount} slab${affectedCount === 1 ? "" : "s"} currently owned by them will move back to Shop stock rather than being deleted.`
+                    : " No slabs are currently assigned to them."}
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline btn-block" onClick={() => setConfirmDeleteBuilder(null)}>Cancel</button>
+                <button className="btn btn-danger btn-block" onClick={() => deleteBuilder(confirmDeleteBuilder)}>Remove</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ADD VENDOR MODAL */}
       {addVendorOpen && (
