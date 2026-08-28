@@ -56,7 +56,45 @@ to confirm it's actually saving to Supabase now.
 → pick the repo → add the same two environment variables under
 Site settings → Environment variables → Deploy.
 
-## 5. Password-protect it
+## 5. Set up employee logins (Supabase Auth)
+
+The site now has a real login screen — no one can see any inventory data
+without signing in, and every pull/reserve/cut/hold gets attributed to
+whoever's logged in.
+
+**If you already deployed this before this update:** go back into your
+Supabase project's **SQL Editor** and run `supabase-setup.sql` again — it now
+tightens the security policy to require a logged-in user instead of allowing
+open access. This is a one-time step; you won't need to re-run it after this.
+
+**To add an employee:**
+1. In Supabase, go to **Authentication → Users**.
+2. Click **Add user → Create new user**.
+3. Enter their email and a password (make one up if they don't want to use
+   their real email as their login — it doesn't need to receive mail; company
+   emails like `name@yourcompany.com` work fine even if that inbox isn't
+   actively used).
+4. Toggle **Auto Confirm User** to ON before creating — this skips email
+   verification, since you're creating the account directly rather than
+   having them sign up themselves.
+5. Give that employee their email + password. They'll use it to log into the
+   site directly — no separate account creation screen exists, which is
+   intentional, so only people you've explicitly added can get in.
+
+**One extra lock worth flipping:** in Supabase, go to **Authentication →
+Settings**, and turn off **"Allow new users to sign up."** The app has no
+sign-up screen anyway, but this closes the door on anyone hitting Supabase's
+sign-up API directly.
+
+To remove someone's access later (an employee leaves, etc.), just delete
+their user under Authentication → Users — takes effect immediately.
+
+## 6. Password-protect the site itself (optional, extra layer)
+
+With real logins in place from step 5, this is no longer your main line of
+defense — but it's a reasonable extra layer if you want the site itself
+unreachable to search engines or random visitors before they even see a
+login screen:
 
 - **Netlify** (paid plans): Site settings → Access control → Visitor access →
   Password protection.
@@ -64,13 +102,13 @@ Site settings → Environment variables → Deploy.
   Cloudflare and set up a free Zero Trust Access policy that requires a login
   (email code, Google login, etc.) before anyone can reach it.
 
-## 6. Point your own domain at it (optional)
+## 7. Point your own domain at it (optional)
 
 In Vercel or Netlify, go to your project's Domain settings, add your domain,
 and follow the DNS instructions they give you (usually just adding one or two
 records at wherever you bought the domain).
 
-## 7. Install it as an app on phones
+## 8. Install it as an app on phones
 
 Once it's live and deployed (steps 3–4), anyone can turn it into a real app
 icon on their phone — no App Store needed:
@@ -89,14 +127,10 @@ each store's developer program ($99/year for Apple, $25 one-time for
 Google) and review process. Worth a separate conversation if that's
 something you actually need, since most internal shop tools don't.
 
-## A security note
+## Where things stand on security
 
-Right now, the Supabase table's security policy allows full read/write access
-to anyone holding the public "anon" key — which is visible in the deployed
-site's code (this is normal for client-only apps like this one). Practically,
-that means the password protection on the website itself (step 5) is your
-main security boundary, not the database. That's a reasonable setup for an
-internal team tool, but if this ever needs to be locked down further (e.g.
-distinct logins per employee, or data too sensitive for a shared password),
-the next step up is adding real user accounts via Supabase Auth — that's a
-bigger change and worth a separate conversation if you get there.
+With the updated SQL policy in step 5, the database itself now requires a
+real login — not just the website's front door. The optional host-level
+password in step 6 is a nice-to-have extra layer, not a requirement. If you
+ever want finer-grained control (e.g., some employees can see costs and
+others can't), that's a further step worth its own conversation.

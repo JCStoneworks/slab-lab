@@ -10,15 +10,17 @@ create table if not exists kv_store (
   primary key (key, shared)
 );
 
--- Row Level Security is on by default in Supabase. This policy allows the app's
--- public "anon" key to read and write freely, since access control for this app
--- is handled at the hosting level (password-protecting the site itself) rather
--- than per-user logins. If you later want per-user accounts inside the app
--- itself, this policy is the first thing you'd tighten.
+-- Row Level Security is on by default in Supabase. This policy requires a real,
+-- logged-in user (via Supabase Auth) before any read or write is allowed — this
+-- is what makes per-employee login screens an actual security boundary, not
+-- just a UI gate: even someone with the site's public API key can't reach the
+-- data without signing in first.
 alter table kv_store enable row level security;
 
-create policy "Allow all access via anon key"
+drop policy if exists "Allow all access via anon key" on kv_store;
+
+create policy "Allow authenticated users full access"
   on kv_store
   for all
-  using (true)
-  with check (true);
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
