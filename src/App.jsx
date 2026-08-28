@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Plus, Search, Eye, EyeOff, Hammer, Package, Building2, X, Check, Undo2, Scissors, BadgeCheck, Trash2, ChevronDown, FlaskConical, Printer, ScanLine, AlertCircle, FileText, Copy, ListChecks, LayoutGrid, List, Camera, ClipboardCheck, ShieldAlert, Mail, Truck, CalendarClock, PackageCheck } from "lucide-react";
+import { Plus, Search, Eye, EyeOff, Hammer, Package, Building2, X, Check, Undo2, Scissors, BadgeCheck, Trash2, ChevronDown, FlaskConical, Printer, ScanLine, AlertCircle, FileText, Copy, ListChecks, LayoutGrid, List, Camera, ClipboardCheck, ShieldAlert, Truck, CalendarClock, PackageCheck } from "lucide-react";
 
 const STORAGE_KEY = "slab-inventory-data";
 const JSBARCODE_SRC = "https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js";
@@ -241,6 +241,7 @@ const getPricing = (s) => {
 const emptyForm = {
   kind: "slab",
   materialName: "",
+  color: "",
   lengthIn: "",
   widthIn: "",
   shape: null,
@@ -259,18 +260,25 @@ const emptyForm = {
   useManualRetail: false,
   owner: "Shop",
   photoLink: "",
+  salesOrderNumber: "",
+  invoiceNumber: "",
   notes: "",
 };
 
 const emptyOrderForm = () => ({
   materialName: "",
+  color: "",
   vendor: "",
   thickness: "3cm",
   quantity: "1",
+  lengthIn: "",
+  widthIn: "",
   owner: "Shop",
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: "",
   lotNumber: "",
+  jobName: "",
+  salesOrderNumber: "",
   notes: "",
 });
 
@@ -289,6 +297,7 @@ export default function SlabInventoryApp() {
   const [builders, setBuilders] = useState([]);
   const [vendors, setVendors] = useState(["MSI", "Arizona Tile", "Daltile"]);
   const [orders, setOrders] = useState([]);
+  const [salesReps, setSalesReps] = useState([]);
   const [showCosts, setShowCosts] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -307,6 +316,9 @@ export default function SlabInventoryApp() {
   const [confirmDeleteBuilder, setConfirmDeleteBuilder] = useState(null);
   const [addVendorOpen, setAddVendorOpen] = useState(false);
   const [newVendorName, setNewVendorName] = useState("");
+  const [addSalesRepOpen, setAddSalesRepOpen] = useState(false);
+  const [newSalesRepName, setNewSalesRepName] = useState("");
+  const [reserveSalesRep, setReserveSalesRep] = useState("");
   const [formId, setFormId] = useState(null);
   const [photoDataUrl, setPhotoDataUrl] = useState(null);
   const [photoRemoved, setPhotoRemoved] = useState(false);
@@ -323,7 +335,7 @@ export default function SlabInventoryApp() {
   const [docError, setDocError] = useState("");
   const [docViewingId, setDocViewingId] = useState(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkDefaults, setBulkDefaults] = useState({ vendor: "", lotNumber: "", owner: "Shop", thickness: "3cm", dateReceived: new Date().toISOString().slice(0, 10) });
+  const [bulkDefaults, setBulkDefaults] = useState({ vendor: "", lotNumber: "", owner: "Shop", thickness: "3cm", color: "", dateReceived: new Date().toISOString().slice(0, 10) });
   const [bulkRows, setBulkRows] = useState([]);
   const [printListOpen, setPrintListOpen] = useState(false);
   const [printIncludeWholesale, setPrintIncludeWholesale] = useState(true);
@@ -334,6 +346,9 @@ export default function SlabInventoryApp() {
   const [barcodeError, setBarcodeError] = useState(false);
   const [labelQueue, setLabelQueue] = useState(null);
   const labelQueueCanvases = useRef(new Map());
+  const [holdLabelSlab, setHoldLabelSlab] = useState(null);
+  const holdBarcodeCanvasRef = useRef(null);
+  const holdQrCodeRef = useRef(null);
   const [scanValue, setScanValue] = useState("");
   const [scanError, setScanError] = useState(false);
   const [scanResultSlab, setScanResultSlab] = useState(null);
@@ -347,9 +362,18 @@ export default function SlabInventoryApp() {
   const [baseCostRate, setBaseCostRate] = useState("");
   const [reserveCustomer, setReserveCustomer] = useState("");
   const [reserveJobNumber, setReserveJobNumber] = useState("");
-  const [reserveCustomerEmail, setReserveCustomerEmail] = useState("");
   const [reserveHoldExpires, setReserveHoldExpires] = useState("");
   const [expiredHoldsOnly, setExpiredHoldsOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [colorFilter, setColorFilter] = useState("");
+  const [materialNameFilter, setMaterialNameFilter] = useState("");
+  const [vendorFilterInv, setVendorFilterInv] = useState("");
+  const [thicknessFilterInv, setThicknessFilterInv] = useState("");
+  const [minSqftFilter, setMinSqftFilter] = useState("");
+  const [orderFiltersOpen, setOrderFiltersOpen] = useState(false);
+  const [orderColorFilter, setOrderColorFilter] = useState("");
+  const [orderVendorFilter, setOrderVendorFilter] = useState("");
+  const [orderThicknessFilter, setOrderThicknessFilter] = useState("");
   const [auditActive, setAuditActive] = useState(false);
   const [auditScope, setAuditScope] = useState([]);
   const [auditScannedIds, setAuditScannedIds] = useState(new Set());
@@ -403,6 +427,7 @@ export default function SlabInventoryApp() {
           setBuilders(parsed.builders || []);
           setVendors(parsed.vendors && parsed.vendors.length ? parsed.vendors : ["MSI", "Arizona Tile", "Daltile"]);
           setOrders(parsed.orders || []);
+          setSalesReps(parsed.salesReps || []);
         }
       } catch (e) {
         // no existing data yet, start fresh
@@ -413,11 +438,11 @@ export default function SlabInventoryApp() {
   }, []);
 
   // ---- save ----
-  const persist = useCallback(async (nextSlabs, nextBuilders, nextVendors, nextOrders) => {
+  const persist = useCallback(async (nextSlabs, nextBuilders, nextVendors, nextOrders, nextSalesReps) => {
     try {
       const result = await window.storage.set(
         STORAGE_KEY,
-        JSON.stringify({ slabs: nextSlabs, builders: nextBuilders, vendors: nextVendors, orders: nextOrders }),
+        JSON.stringify({ slabs: nextSlabs, builders: nextBuilders, vendors: nextVendors, orders: nextOrders, salesReps: nextSalesReps }),
         true
       );
       if (!result) setSaveError(true);
@@ -428,8 +453,8 @@ export default function SlabInventoryApp() {
   }, []);
 
   useEffect(() => {
-    if (loaded) persist(slabs, builders, vendors, orders);
-  }, [slabs, builders, vendors, orders, loaded, persist]);
+    if (loaded) persist(slabs, builders, vendors, orders, salesReps);
+  }, [slabs, builders, vendors, orders, salesReps, loaded, persist]);
 
   // ---- derived ----
   const owners = useMemo(() => ["Shop", ...builders], [builders]);
@@ -451,14 +476,19 @@ export default function SlabInventoryApp() {
         const hi = s.status === STATUS.RESERVED && s.holdExpires ? daysBetween(todayStr(), s.holdExpires) < 0 : false;
         if (!hi) return false;
       }
+      if (colorFilter && s.color !== colorFilter) return false;
+      if (materialNameFilter && s.materialName !== materialNameFilter) return false;
+      if (vendorFilterInv && s.vendor !== vendorFilterInv) return false;
+      if (thicknessFilterInv && s.thickness !== thicknessFilterInv) return false;
+      if (minSqftFilter && getSqft(s) < parseFloat(minSqftFilter)) return false;
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const hay = `${s.materialName} ${s.lotNumber} ${s.vendor} ${s.jobName || ""} ${s.customerName || ""} ${s.jobNumber || ""}`.toLowerCase();
+        const hay = `${s.materialName} ${s.color || ""} ${s.lotNumber} ${s.vendor} ${s.jobName || ""} ${s.customerName || ""} ${s.jobNumber || ""} ${s.salesOrderNumber || ""} ${s.invoiceNumber || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     }).sort((a, b) => (b.dateReceived || "").localeCompare(a.dateReceived || ""));
-  }, [slabs, activeTab, statusFilter, remnantOnly, notScannedOnly, expiredHoldsOnly, search]);
+  }, [slabs, activeTab, statusFilter, remnantOnly, notScannedOnly, expiredHoldsOnly, colorFilter, materialNameFilter, vendorFilterInv, thicknessFilterInv, minSqftFilter, search]);
 
   // ---- form handlers ----
   const openAdd = () => {
@@ -476,6 +506,7 @@ export default function SlabInventoryApp() {
   const openEdit = (slab) => {
     setForm({
       materialName: slab.materialName,
+      color: slab.color || "",
       lengthIn: slab.lengthIn,
       widthIn: slab.widthIn,
       kind: slab.kind || "slab",
@@ -495,6 +526,8 @@ export default function SlabInventoryApp() {
       useManualRetail: !!slab.useManualRetail,
       owner: slab.owner,
       photoLink: slab.photoLink || "",
+      salesOrderNumber: slab.salesOrderNumber || "",
+      invoiceNumber: slab.invoiceNumber || "",
       notes: slab.notes || "",
     });
     setFormId(slab.id);
@@ -730,8 +763,9 @@ export default function SlabInventoryApp() {
   const emptyBulkRow = (defaults) => ({
     rowId: uid(),
     materialName: "",
-    lengthIn: "",
-    widthIn: "",
+    color: defaults.color || "",
+    lengthIn: defaults.lengthIn || "",
+    widthIn: defaults.widthIn || "",
     thickness: defaults.thickness,
     lotNumber: defaults.lotNumber,
     vendor: defaults.vendor,
@@ -739,7 +773,7 @@ export default function SlabInventoryApp() {
   });
 
   const openBulkAdd = () => {
-    const defaults = { vendor: "", lotNumber: "", owner: "Shop", thickness: "3cm", dateReceived: new Date().toISOString().slice(0, 10) };
+    const defaults = { vendor: "", lotNumber: "", owner: "Shop", thickness: "3cm", color: "", dateReceived: new Date().toISOString().slice(0, 10) };
     setBulkDefaults(defaults);
     setBulkRows(Array.from({ length: 5 }, () => emptyBulkRow(defaults)));
     setReceivingOrderId(null);
@@ -755,7 +789,7 @@ export default function SlabInventoryApp() {
   const removeBulkRow = (rowId) => setBulkRows((prev) => prev.filter((r) => r.rowId !== rowId));
   const updateBulkRow = (rowId, key, value) => setBulkRows((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, [key]: value } : r)));
   const applyBulkDefaultsToRows = () => {
-    setBulkRows((prev) => prev.map((r) => ({ ...r, thickness: bulkDefaults.thickness, lotNumber: bulkDefaults.lotNumber, vendor: bulkDefaults.vendor, owner: bulkDefaults.owner })));
+    setBulkRows((prev) => prev.map((r) => ({ ...r, thickness: bulkDefaults.thickness, lotNumber: bulkDefaults.lotNumber, vendor: bulkDefaults.vendor, owner: bulkDefaults.owner, color: bulkDefaults.color })));
   };
 
   const bulkValidCount = bulkRows.filter((r) => r.materialName.trim()).length;
@@ -767,11 +801,15 @@ export default function SlabInventoryApp() {
       setBulkOpen(false);
       return;
     }
+    const sourceOrder = receivingOrderId ? orders.find((o) => o.id === receivingOrderId) : null;
+    const orderJobName = sourceOrder && sourceOrder.jobName ? sourceOrder.jobName.trim() : "";
+    const orderSalesOrderNumber = sourceOrder && sourceOrder.salesOrderNumber ? sourceOrder.salesOrderNumber.trim() : "";
     const newSlabs = validRows.map((r) => ({
       id: uid(),
       barcode: generateBarcode(),
       kind: "slab",
       materialName: r.materialName.trim(),
+      color: r.color || "",
       lengthIn: r.lengthIn,
       widthIn: r.widthIn,
       shape: null,
@@ -793,9 +831,13 @@ export default function SlabInventoryApp() {
       notes: "",
       hasPhoto: false,
       documents: [],
-      status: STATUS.STOCK,
-      jobName: "",
-      history: [{ event: "Received", date: bulkDefaults.dateReceived }],
+      status: orderJobName ? STATUS.RESERVED : STATUS.STOCK,
+      jobName: orderJobName,
+      customerName: "",
+      jobNumber: "",
+      salesOrderNumber: orderSalesOrderNumber,
+      invoiceNumber: "",
+      history: [{ event: orderJobName ? `Received and reserved for ${orderJobName}` : "Received", date: bulkDefaults.dateReceived }],
     }));
     setSlabs((prev) => [...newSlabs, ...prev]);
     setBulkOpen(false);
@@ -812,8 +854,8 @@ export default function SlabInventoryApp() {
     setReserveJob(slab.jobName || "");
     setReserveCustomer(slab.customerName || "");
     setReserveJobNumber(slab.jobNumber || "");
-    setReserveCustomerEmail(slab.customerEmail || "");
     setReserveHoldExpires(slab.holdExpires || "");
+    setReserveSalesRep(slab.salesRep || "");
     setReserveOwner(slab.owner || "Shop");
   };
 
@@ -828,10 +870,10 @@ export default function SlabInventoryApp() {
               jobName: reserveJob.trim(),
               customerName: reserveCustomer.trim(),
               jobNumber: reserveJobNumber.trim(),
-              customerEmail: reserveCustomerEmail.trim(),
               holdExpires: reserveHoldExpires,
+              salesRep: reserveSalesRep,
               owner: reserveOwner,
-              history: [...(s.history || []), { event: `Reserved${reserveJob.trim() ? ` for ${reserveJob.trim()}` : ""}${reserveCustomer.trim() ? ` — ${reserveCustomer.trim()}` : ""}${reserveHoldExpires ? ` (hold expires ${reserveHoldExpires})` : ""}`, date: new Date().toISOString().slice(0, 10) }],
+              history: [...(s.history || []), { event: `Reserved${reserveJob.trim() ? ` for ${reserveJob.trim()}` : ""}${reserveCustomer.trim() ? ` — ${reserveCustomer.trim()}` : ""}${reserveHoldExpires ? ` (hold expires ${reserveHoldExpires})` : ""}${reserveSalesRep ? ` · rep: ${reserveSalesRep}` : ""}`, date: new Date().toISOString().slice(0, 10) }],
             }
           : s
       )
@@ -846,29 +888,39 @@ export default function SlabInventoryApp() {
     return { expired: days < 0, daysLeft: days };
   };
 
-  const holdEmailUrl = (s) => {
-    const subjectLine = `Your material hold — ${s.materialName}`;
-    const sizeLine = s.kind === "remnant" ? `${getSqft(s).toFixed(1)} sq ft (remnant)` : `${s.lengthIn}" × ${s.widthIn}"`;
-    const bodyLines = [
-      `Hi ${s.customerName || "there"},`,
-      "",
-      "This confirms the following material is on hold for you:",
-      "",
-      `Material: ${s.materialName}`,
-      `Size: ${sizeLine}`,
-      `Thickness: ${s.thickness}`,
-      `Lot #: ${s.lotNumber || "—"}`,
-      s.jobName ? `Job: ${s.jobName}` : null,
-      s.jobNumber ? `Job #: ${s.jobNumber}` : null,
-      "",
-      s.holdExpires ? `This hold will expire on ${s.holdExpires}. Please confirm before then to keep this material reserved.` : "Please contact us to confirm this hold.",
-      "",
-      "Thank you!",
-    ].filter((line) => line !== null);
-    const subject = encodeURIComponent(subjectLine);
-    const body = encodeURIComponent(bodyLines.join("\n"));
-    return `mailto:${encodeURIComponent(s.customerEmail || "")}?subject=${subject}&body=${body}`;
-  };
+  // Auto-release: any reserved slab whose hold expiration date has passed goes back
+  // to available stock automatically, clearing the reservation-specific fields.
+  // Checked once on load and hourly after that, so it also catches a hold expiring
+  // while the app is left open.
+  useEffect(() => {
+    if (!loaded) return;
+    const releaseExpiredHolds = () => {
+      const today = todayStr();
+      setSlabs((prev) => {
+        let changed = false;
+        const next = prev.map((s) => {
+          if (s.status === STATUS.RESERVED && s.holdExpires && s.holdExpires < today) {
+            changed = true;
+            return {
+              ...s,
+              status: STATUS.STOCK,
+              jobName: "",
+              customerName: "",
+              jobNumber: "",
+              holdExpires: "",
+              salesRep: "",
+              history: [...(s.history || []), { event: "Hold expired — automatically released", date: today }],
+            };
+          }
+          return s;
+        });
+        return changed ? next : prev;
+      });
+    };
+    releaseExpiredHolds();
+    const interval = setInterval(releaseExpiredHolds, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [loaded]);
 
   const markCut = (slab) => {
     setSlabs((prev) =>
@@ -894,6 +946,30 @@ export default function SlabInventoryApp() {
               status: STATUS.STOCK,
               jobName: "",
               history: [...(s.history || []), { event: "Returned to stock", date: new Date().toISOString().slice(0, 10) }],
+            }
+          : s
+      )
+    );
+    setDetailSlab(null);
+  };
+
+  // Releasing a hold is distinct from the generic "undo cut" return-to-stock:
+  // it clears every reservation-specific field (job, customer, job #, sales rep,
+  // hold expiration) since the material is now free again. Sales order #/invoice #
+  // are left alone since those are separate business records, not hold context.
+  const releaseHold = (slab) => {
+    setSlabs((prev) =>
+      prev.map((s) =>
+        s.id === slab.id
+          ? {
+              ...s,
+              status: STATUS.STOCK,
+              jobName: "",
+              customerName: "",
+              jobNumber: "",
+              holdExpires: "",
+              salesRep: "",
+              history: [...(s.history || []), { event: "Hold released — returned to stock", date: new Date().toISOString().slice(0, 10) }],
             }
           : s
       )
@@ -952,6 +1028,37 @@ export default function SlabInventoryApp() {
       })
       .catch(() => {});
   }, [labelSlab]);
+
+  useEffect(() => {
+    if (!holdLabelSlab) return;
+    setBarcodeError(false);
+    loadJsBarcode()
+      .then((JsBarcode) => {
+        if (holdBarcodeCanvasRef.current) {
+          JsBarcode(holdBarcodeCanvasRef.current, holdLabelSlab.barcode, {
+            format: "CODE128",
+            displayValue: true,
+            fontSize: 12,
+            height: 36,
+            margin: 6,
+            width: 1.6,
+          });
+        }
+      })
+      .catch(() => setBarcodeError(true));
+  }, [holdLabelSlab]);
+
+  useEffect(() => {
+    if (!holdLabelSlab || !holdQrCodeRef.current) return;
+    holdQrCodeRef.current.innerHTML = "";
+    loadQRCodeLib()
+      .then((QRCode) => {
+        if (holdQrCodeRef.current) {
+          new QRCode(holdQrCodeRef.current, { text: holdLabelSlab.barcode, width: 80, height: 80, correctLevel: QRCode.CorrectLevel.M });
+        }
+      })
+      .catch(() => {});
+  }, [holdLabelSlab]);
 
   useEffect(() => {
     if (!labelQueue || !labelQueue.length) return;
@@ -1091,16 +1198,30 @@ export default function SlabInventoryApp() {
     );
   };
 
+  const COMMON_COLORS = ["White", "Black", "Grey", "Beige", "Brown", "Gold", "Blue", "Green", "Red", "Multicolor"];
+  const colorOptions = useMemo(() => {
+    const set = new Set(COMMON_COLORS);
+    slabs.forEach((s) => { if (s.color) set.add(s.color); });
+    orders.forEach((o) => { if (o.color) set.add(o.color); });
+    return Array.from(set).sort();
+  }, [slabs, orders]);
+  const uniqueSlabColors = useMemo(() => Array.from(new Set(slabs.map((s) => s.color).filter(Boolean))).sort(), [slabs]);
+  const uniqueSlabMaterialNames = useMemo(() => Array.from(new Set(slabs.map((s) => s.materialName).filter(Boolean))).sort(), [slabs]);
+  const uniqueOrderColors = useMemo(() => Array.from(new Set(orders.map((o) => o.color).filter(Boolean))).sort(), [orders]);
+
   const ordersFiltered = useMemo(() => {
     return orders.filter((o) => {
       if (orderStatusFilter !== "all" && o.status !== orderStatusFilter) return false;
+      if (orderColorFilter && o.color !== orderColorFilter) return false;
+      if (orderVendorFilter && o.vendor !== orderVendorFilter) return false;
+      if (orderThicknessFilter && o.thickness !== orderThicknessFilter) return false;
       if (orderSearch.trim()) {
         const q = orderSearch.trim().toLowerCase();
-        if (!`${o.materialName} ${o.vendor}`.toLowerCase().includes(q)) return false;
+        if (!`${o.materialName} ${o.color || ""} ${o.vendor} ${o.jobName || ""} ${o.salesOrderNumber || ""}`.toLowerCase().includes(q)) return false;
       }
       return true;
     }).sort((a, b) => (b.orderDate || "").localeCompare(a.orderDate || ""));
-  }, [orders, orderStatusFilter, orderSearch]);
+  }, [orders, orderStatusFilter, orderColorFilter, orderVendorFilter, orderThicknessFilter, orderSearch]);
 
   const openAddOrder = () => {
     setOrderForm(emptyOrderForm());
@@ -1111,13 +1232,18 @@ export default function SlabInventoryApp() {
   const openEditOrder = (order) => {
     setOrderForm({
       materialName: order.materialName,
+      color: order.color || "",
       vendor: order.vendor,
       thickness: order.thickness,
       quantity: String(order.quantity || 1),
+      lengthIn: order.lengthIn || "",
+      widthIn: order.widthIn || "",
       owner: order.owner,
       orderDate: order.orderDate,
       expectedDate: order.expectedDate || "",
       lotNumber: order.lotNumber || "",
+      jobName: order.jobName || "",
+      salesOrderNumber: order.salesOrderNumber || "",
       notes: order.notes || "",
     });
     setEditingOrderId(order.id);
@@ -1144,14 +1270,19 @@ export default function SlabInventoryApp() {
     setConfirmDeleteOrder(null);
   };
 
-  // Receiving an order pre-fills Fast Add with the expected quantity, then marks
-  // the order as received once those slabs are actually saved into inventory.
+  // Receiving an order pre-fills Fast Add with the expected quantity/size, then
+  // marks the order as received once those slabs are actually saved into inventory.
+  // If the order was placed for a specific job, the received slabs come in already
+  // reserved for that job, carrying the sales order # along with them.
   const receiveOrder = (order) => {
     const defaults = {
       vendor: order.vendor || "",
       lotNumber: order.lotNumber || "",
       owner: order.owner || "Shop",
       thickness: order.thickness || "3cm",
+      lengthIn: order.lengthIn || "",
+      widthIn: order.widthIn || "",
+      color: order.color || "",
       dateReceived: todayStr(),
     };
     setBulkDefaults(defaults);
@@ -1185,6 +1316,15 @@ export default function SlabInventoryApp() {
     setForm((f) => ({ ...f, vendor: name }));
     setNewVendorName("");
     setAddVendorOpen(false);
+  };
+
+  const addSalesRep = () => {
+    const name = newSalesRepName.trim();
+    if (!name || salesReps.includes(name)) return;
+    setSalesReps((prev) => [...prev, name]);
+    setReserveSalesRep(name);
+    setNewSalesRepName("");
+    setAddSalesRepOpen(false);
   };
 
   useEffect(() => {
@@ -1482,6 +1622,22 @@ export default function SlabInventoryApp() {
         .label-material { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 16px; }
         .label-line { font-size: 12.5px; color: var(--stone-soft); }
         .label-sheet canvas { margin-top: 8px; max-width: 100%; }
+
+        .hold-label-banner {
+          font-family: 'Space Grotesk', sans-serif;
+          font-weight: 800;
+          font-size: 20px;
+          letter-spacing: 2px;
+          color: white;
+          background: var(--danger);
+          padding: 6px 20px;
+          border-radius: 20px;
+          margin-bottom: 4px;
+        }
+        .hold-label-divider { width: 100%; height: 1px; background: var(--line); margin: 4px 0; }
+        .hold-label-strong { color: var(--stone); font-weight: 600; font-size: 13.5px; }
+        .hold-label-expiry { font-weight: 700; color: var(--warn); }
+        .hold-label-expiry.expired { color: var(--danger); }
 
         .batch-label-wrap { display: flex; flex-direction: column; gap: 12px; }
         .batch-label-sheet { margin-bottom: 0; }
@@ -2049,6 +2205,10 @@ export default function SlabInventoryApp() {
 
       {saveError && <div className="save-warning">Changes aren't saving right now — check your connection and keep this tab open.</div>}
 
+      <datalist id="color-options">
+        {colorOptions.map((c) => <option key={c} value={c} />)}
+      </datalist>
+
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark"><FlaskConical size={19} color="#1c2321" strokeWidth={2.25} /></div>
@@ -2166,7 +2326,56 @@ export default function SlabInventoryApp() {
           <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")} title="List view"><List size={15} /></button>
           <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="Grid view"><LayoutGrid size={15} /></button>
         </div>
+        <button className={`btn btn-outline btn-sm ${filtersOpen ? "active" : ""}`} onClick={() => setFiltersOpen((v) => !v)}>
+          More Filters <ChevronDown size={14} style={{ transform: filtersOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+        </button>
       </div>
+
+      {filtersOpen && (
+        <div className="toolbar filters-panel">
+          <div className="field">
+            <label>Color</label>
+            <select value={colorFilter} onChange={(e) => setColorFilter(e.target.value)}>
+              <option value="">All colors</option>
+              {uniqueSlabColors.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Material name</label>
+            <select value={materialNameFilter} onChange={(e) => setMaterialNameFilter(e.target.value)}>
+              <option value="">All names</option>
+              {uniqueSlabMaterialNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Vendor</label>
+            <select value={vendorFilterInv} onChange={(e) => setVendorFilterInv(e.target.value)}>
+              <option value="">All vendors</option>
+              {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Thickness</label>
+            <select value={thicknessFilterInv} onChange={(e) => setThicknessFilterInv(e.target.value)}>
+              <option value="">All thicknesses</option>
+              <option>2cm</option>
+              <option>3cm</option>
+              <option>1.2cm</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Min sq ft</label>
+            <input type="number" value={minSqftFilter} onChange={(e) => setMinSqftFilter(e.target.value)} placeholder="e.g. 30" />
+          </div>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => { setColorFilter(""); setMaterialNameFilter(""); setVendorFilterInv(""); setThicknessFilterInv(""); setMinSqftFilter(""); }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       <div className="content">
         {filtered.length === 0 ? (
@@ -2185,7 +2394,7 @@ export default function SlabInventoryApp() {
                   <div className={`list-status-bar status-${s.status}`} />
                   <div className="list-main">
                     <div className="list-top-line">
-                      <span className="list-name">{s.materialName}</span>
+                      <span className="list-name">{s.materialName}{s.color ? ` — ${s.color}` : ""}</span>
                       {s.kind === "remnant" && <span className="badge badge-remnant">Remnant</span>}
                       {s.flaggedMissing && <span className="badge badge-missing">Not Scanned</span>}
                       {hi && hi.expired && <span className="badge badge-missing">Hold Expired</span>}
@@ -2225,7 +2434,7 @@ export default function SlabInventoryApp() {
                     <div className="card-top">
                       <div>
                         <div className="card-name">
-                          {s.materialName}
+                          {s.materialName}{s.color ? ` — ${s.color}` : ""}
                           {s.kind === "remnant" && <span className="badge badge-remnant" style={{ marginLeft: 6 }}>Remnant</span>}
                           {s.flaggedMissing && <span className="badge badge-missing" style={{ marginLeft: 6 }}>Not Scanned</span>}
                         </div>
@@ -2279,7 +2488,7 @@ export default function SlabInventoryApp() {
           <div className="toolbar">
             <div className="search-box">
               <Search size={15} color="#3a4340" />
-              <input placeholder="Search material or vendor..." value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+              <input placeholder="Search material, color, vendor, job, SO #..." value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
             </div>
             <select value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value)}>
               <option value="ordered">On order</option>
@@ -2287,7 +2496,45 @@ export default function SlabInventoryApp() {
               <option value="cancelled">Cancelled</option>
               <option value="all">All</option>
             </select>
+            <button className={`btn btn-outline btn-sm ${orderFiltersOpen ? "active" : ""}`} onClick={() => setOrderFiltersOpen((v) => !v)}>
+              More Filters <ChevronDown size={14} style={{ transform: orderFiltersOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+            </button>
           </div>
+
+          {orderFiltersOpen && (
+            <div className="toolbar filters-panel">
+              <div className="field">
+                <label>Color</label>
+                <select value={orderColorFilter} onChange={(e) => setOrderColorFilter(e.target.value)}>
+                  <option value="">All colors</option>
+                  {uniqueOrderColors.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Vendor</label>
+                <select value={orderVendorFilter} onChange={(e) => setOrderVendorFilter(e.target.value)}>
+                  <option value="">All vendors</option>
+                  {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Thickness</label>
+                <select value={orderThicknessFilter} onChange={(e) => setOrderThicknessFilter(e.target.value)}>
+                  <option value="">All thicknesses</option>
+                  <option>2cm</option>
+                  <option>3cm</option>
+                  <option>1.2cm</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => { setOrderColorFilter(""); setOrderVendorFilter(""); setOrderThicknessFilter(""); }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {ordersFiltered.length === 0 ? (
             <div className="empty">
@@ -2302,11 +2549,19 @@ export default function SlabInventoryApp() {
                   <div className="order-card" key={o.id}>
                     <div className="order-card-top">
                       <div>
-                        <div className="order-name">{o.materialName}</div>
-                        <div className="order-sub">{o.vendor || "No vendor set"} · Qty {o.quantity || 1} · {o.thickness} · {o.owner}</div>
+                        <div className="order-name">{o.materialName}{o.color ? ` — ${o.color}` : ""}</div>
+                        <div className="order-sub">
+                          {o.vendor || "No vendor set"} · Qty {o.quantity || 1} · {o.thickness} · {o.owner}
+                          {o.lengthIn && o.widthIn ? ` · ${o.lengthIn}"×${o.widthIn}" (${sqftOf(o.lengthIn, o.widthIn).toFixed(1)} sqft ea.)` : ""}
+                        </div>
                       </div>
                       <span className={`badge ${overdue ? "badge-missing" : `badge-order-${o.status}`}`}>{o.status === "ordered" ? (overdue ? "Overdue" : "On Order") : o.status === "received" ? "Received" : "Cancelled"}</span>
                     </div>
+                    {(o.jobName || o.salesOrderNumber) && (
+                      <div className="job-tag" style={{ alignSelf: "flex-start" }}>
+                        <BadgeCheck size={13} /> {o.jobName || "General stock"}{o.salesOrderNumber ? ` · SO #${o.salesOrderNumber}` : ""}
+                      </div>
+                    )}
                     <div className="order-dates mono">
                       Ordered {o.orderDate || "—"}
                       {o.expectedDate ? ` · Expected ${o.expectedDate}` : ""}
@@ -2405,6 +2660,28 @@ export default function SlabInventoryApp() {
         </div>
       )}
 
+      {/* ADD SALES REP MODAL */}
+      {addSalesRepOpen && (
+        <div className="overlay" onClick={() => setAddSalesRepOpen(false)}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add a sales rep</h2>
+              <button className="icon-btn" onClick={() => setAddSalesRepOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label>Sales rep name</label>
+                <input autoFocus value={newSalesRepName} onChange={(e) => setNewSalesRepName(e.target.value)} placeholder="e.g. Jamie Rivera" onKeyDown={(e) => e.key === "Enter" && addSalesRep()} />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline btn-block" onClick={() => setAddSalesRepOpen(false)}>Cancel</button>
+              <button className="btn btn-primary btn-block" onClick={addSalesRep}>Add sales rep</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ADD/EDIT SLAB MODAL */}
       {formOpen && (
         <div className="overlay" onClick={() => setFormOpen(false)}>
@@ -2414,9 +2691,15 @@ export default function SlabInventoryApp() {
               <button className="icon-btn" onClick={() => setFormOpen(false)}><X size={18} /></button>
             </div>
             <div className="modal-body">
-              <div className="field">
-                <label>Material / slab name</label>
-                <input value={form.materialName} onChange={(e) => setForm({ ...form, materialName: e.target.value })} placeholder="e.g. Calacatta Gold" />
+              <div className="row-2">
+                <div className="field">
+                  <label>Material / slab name</label>
+                  <input value={form.materialName} onChange={(e) => setForm({ ...form, materialName: e.target.value })} placeholder="e.g. Calacatta Gold" />
+                </div>
+                <div className="field">
+                  <label>Color</label>
+                  <input list="color-options" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} placeholder="e.g. White" />
+                </div>
               </div>
 
               <div className="kind-toggle">
@@ -2632,6 +2915,17 @@ export default function SlabInventoryApp() {
                 <input value={form.photoLink} onChange={(e) => setForm({ ...form, photoLink: e.target.value })} placeholder="https://..." />
               </div>
 
+              <div className="row-2">
+                <div className="field">
+                  <label>Sales order #</label>
+                  <input value={form.salesOrderNumber} onChange={(e) => setForm({ ...form, salesOrderNumber: e.target.value })} placeholder="Optional" />
+                </div>
+                <div className="field">
+                  <label>Invoice #</label>
+                  <input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Optional" />
+                </div>
+              </div>
+
               <div className="field">
                 <label>Notes</label>
                 <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" />
@@ -2670,22 +2964,32 @@ export default function SlabInventoryApp() {
                   <input value={reserveJobNumber} onChange={(e) => setReserveJobNumber(e.target.value)} placeholder="e.g. 4471" />
                 </div>
               </div>
-              <div className="field">
-                <label>Customer email (for hold notice)</label>
-                <input type="email" value={reserveCustomerEmail} onChange={(e) => setReserveCustomerEmail(e.target.value)} placeholder="customer@email.com" />
-              </div>
               <div className="row-2">
                 <div className="field">
                   <label>Hold expires</label>
                   <input type="date" value={reserveHoldExpires} onChange={(e) => setReserveHoldExpires(e.target.value)} />
                 </div>
                 <div className="field">
-                  <label>Belongs to</label>
-                  <select value={reserveOwner} onChange={(e) => setReserveOwner(e.target.value)}>
-                    <option value="Shop">Shop</option>
-                    {builders.map((b) => <option key={b} value={b}>{b}</option>)}
+                  <label>Sales rep</label>
+                  <select
+                    value={reserveSalesRep}
+                    onChange={(e) => {
+                      if (e.target.value === "__add__") setAddSalesRepOpen(true);
+                      else setReserveSalesRep(e.target.value);
+                    }}
+                  >
+                    <option value="">None</option>
+                    {salesReps.map((r) => <option key={r} value={r}>{r}</option>)}
+                    <option value="__add__">+ Add new sales rep…</option>
                   </select>
                 </div>
+              </div>
+              <div className="field">
+                <label>Belongs to</label>
+                <select value={reserveOwner} onChange={(e) => setReserveOwner(e.target.value)}>
+                  <option value="Shop">Shop</option>
+                  {builders.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
               </div>
             </div>
             <div className="modal-footer">
@@ -2708,7 +3012,7 @@ export default function SlabInventoryApp() {
           <div className="overlay" onClick={() => setDetailSlab(null)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h2>{s.materialName}</h2>
+                <h2>{s.materialName}{s.color ? ` — ${s.color}` : ""}</h2>
                 <button className="icon-btn" onClick={() => setDetailSlab(null)}><X size={18} /></button>
               </div>
               <div className="modal-body">
@@ -2744,7 +3048,7 @@ export default function SlabInventoryApp() {
                   </div>
                 )}
 
-                {s.status === STATUS.RESERVED && (s.holdExpires || s.customerEmail) && (() => {
+                {s.status === STATUS.RESERVED && (() => {
                   const hi = holdInfo(s);
                   return (
                     <div className={`hold-box ${hi && hi.expired ? "expired" : ""}`}>
@@ -2755,9 +3059,11 @@ export default function SlabInventoryApp() {
                           : <span>Hold expires {s.holdExpires} ({hi.daysLeft} day{hi.daysLeft === 1 ? "" : "s"} left)</span>
                         ) : <span>No hold expiration set</span>}
                       </div>
-                      {s.customerEmail && (
-                        <a className="btn btn-outline btn-sm" href={holdEmailUrl(s)}><Mail size={14} /> Email Hold Info</a>
-                      )}
+                      {s.salesRep && <div className="hold-box-row">Held by: <b>{s.salesRep}</b></div>}
+                      <div className="action-row">
+                        <button className="btn btn-outline btn-sm" onClick={() => setHoldLabelSlab(s)}><Printer size={14} /> Print Hold Label</button>
+                        <button className="btn btn-outline btn-sm" onClick={() => releaseHold(s)}><Undo2 size={14} /> Release Hold</button>
+                      </div>
                     </div>
                   );
                 })()}
@@ -2798,6 +3104,13 @@ export default function SlabInventoryApp() {
                   <div className="cost-reveal-note">Cost and margins are hidden. Turn on "Costs Visible" in the top bar to view them.</div>
                 )}
 
+                {(s.salesOrderNumber || s.invoiceNumber) && (
+                  <div className="detail-grid">
+                    <div className="detail-item"><div className="meta-label">Sales order #</div><div className="meta-val">{s.salesOrderNumber || "—"}</div></div>
+                    <div className="detail-item"><div className="meta-label">Invoice #</div><div className="meta-val">{s.invoiceNumber || "—"}</div></div>
+                  </div>
+                )}
+
                 {s.notes && (
                   <div className="detail-item">
                     <div className="meta-label">Notes</div>
@@ -2817,7 +3130,7 @@ export default function SlabInventoryApp() {
                   {s.status === STATUS.RESERVED && (
                     <>
                       <button className="btn btn-outline btn-sm" onClick={() => markCut(s)}><Scissors size={14} /> Mark cut & used</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => returnToStock(s)}><Undo2 size={14} /> Return to stock</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => releaseHold(s)}><Undo2 size={14} /> Release hold</button>
                       <button className="btn btn-outline btn-sm" onClick={() => openReserve(s)}>Edit reservation</button>
                     </>
                   )}
@@ -2961,6 +3274,54 @@ export default function SlabInventoryApp() {
         </div>
       )}
 
+      {/* HOLD LABEL MODAL */}
+      {holdLabelSlab && (() => {
+        const hi = holdInfo(holdLabelSlab);
+        return (
+          <div className="overlay" onClick={() => setHoldLabelSlab(null)}>
+            <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header no-print">
+                <h2>Print hold label</h2>
+                <button className="icon-btn" onClick={() => setHoldLabelSlab(null)}><X size={18} /></button>
+              </div>
+              <div className="modal-body">
+                <div className="label-sheet hold-label-sheet print-target">
+                  <div className="hold-label-banner">ON HOLD</div>
+                  <div className="label-material">{holdLabelSlab.materialName}{holdLabelSlab.kind === "remnant" ? " (Remnant)" : ""}</div>
+                  <div className="label-line">
+                    {holdLabelSlab.kind === "remnant" ? `${getSqft(holdLabelSlab).toFixed(1)} sq ft` : `${holdLabelSlab.lengthIn}" × ${holdLabelSlab.widthIn}"`}
+                    {" · "}{holdLabelSlab.thickness} · Lot {holdLabelSlab.lotNumber || "—"}
+                  </div>
+                  <div className="hold-label-divider" />
+                  <div className="label-line hold-label-strong">Job: {holdLabelSlab.jobName || "—"}</div>
+                  <div className="label-line hold-label-strong">Customer: {holdLabelSlab.customerName || "—"}</div>
+                  {holdLabelSlab.jobNumber && <div className="label-line">Job #: {holdLabelSlab.jobNumber}</div>}
+                  {holdLabelSlab.salesOrderNumber && <div className="label-line">Sales order #: {holdLabelSlab.salesOrderNumber}</div>}
+                  {holdLabelSlab.salesRep && <div className="label-line">Held by: {holdLabelSlab.salesRep}</div>}
+                  <div className={`label-line hold-label-expiry ${hi && hi.expired ? "expired" : ""}`}>
+                    {holdLabelSlab.holdExpires
+                      ? (hi.expired ? `Hold expired ${holdLabelSlab.holdExpires}` : `Hold expires ${holdLabelSlab.holdExpires}`)
+                      : "No expiration set"}
+                  </div>
+                  <div className="label-codes">
+                    <div ref={holdQrCodeRef} className="label-qr" />
+                    {barcodeError ? (
+                      <div className="cost-reveal-note" style={{ marginTop: 8 }}>Couldn't load the barcode renderer — check your connection and reopen this label.</div>
+                    ) : (
+                      <canvas ref={holdBarcodeCanvasRef} />
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer no-print">
+                <button className="btn btn-outline btn-block" onClick={() => setHoldLabelSlab(null)}>Close</button>
+                <button className="btn btn-primary btn-block" onClick={printLabel}><Printer size={16} /> Print</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* BATCH LABEL PRINT MODAL (from Fast Add) */}
       {labelQueue && (
         <div className="overlay" onClick={() => setLabelQueue(null)}>
@@ -3028,7 +3389,7 @@ export default function SlabInventoryApp() {
           <div className="overlay" onClick={() => setScanResultSlab(null)}>
             <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h2>{s.materialName}</h2>
+                <h2>{s.materialName}{s.color ? ` — ${s.color}` : ""}</h2>
                 <button className="icon-btn" onClick={() => setScanResultSlab(null)}><X size={18} /></button>
               </div>
               <div className="modal-body">
@@ -3047,7 +3408,7 @@ export default function SlabInventoryApp() {
                   {s.status === STATUS.RESERVED && (
                     <>
                       <button className="btn btn-outline btn-sm" onClick={() => { markCut(s); setScanResultSlab(null); }}><Scissors size={14} /> Mark cut & used</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => { returnToStock(s); setScanResultSlab(null); }}><Undo2 size={14} /> Return to stock</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => { releaseHold(s); setScanResultSlab(null); }}><Undo2 size={14} /> Release hold</button>
                     </>
                   )}
                   {s.status === STATUS.CUT && (
@@ -3154,6 +3515,10 @@ export default function SlabInventoryApp() {
                     </select>
                   </div>
                 </div>
+                <div className="field">
+                  <label>Default color</label>
+                  <input list="color-options" value={bulkDefaults.color} onChange={(e) => setBulkDefaults((d) => ({ ...d, color: e.target.value }))} placeholder="Shared color" />
+                </div>
                 <button type="button" className="btn btn-outline btn-sm" onClick={applyBulkDefaultsToRows}>Apply defaults to all rows below</button>
               </div>
 
@@ -3164,8 +3529,9 @@ export default function SlabInventoryApp() {
                       <span className="meta-label">Slab {idx + 1}</span>
                       <button className="icon-btn" onClick={() => removeBulkRow(r.rowId)}><Trash2 size={14} /></button>
                     </div>
-                    <div className="field">
-                      <input placeholder="Material name" value={r.materialName} onChange={(e) => updateBulkRow(r.rowId, "materialName", e.target.value)} />
+                    <div className="row-2">
+                      <div className="field"><input placeholder="Material name" value={r.materialName} onChange={(e) => updateBulkRow(r.rowId, "materialName", e.target.value)} /></div>
+                      <div className="field"><input list="color-options" placeholder="Color" value={r.color} onChange={(e) => updateBulkRow(r.rowId, "color", e.target.value)} /></div>
                     </div>
                     <div className="row-3">
                       <div className="field"><input type="number" placeholder="Length (in)" value={r.lengthIn} onChange={(e) => updateBulkRow(r.rowId, "lengthIn", e.target.value)} /></div>
@@ -3298,9 +3664,15 @@ export default function SlabInventoryApp() {
               <button className="icon-btn" onClick={() => setOrderFormOpen(false)}><X size={18} /></button>
             </div>
             <div className="modal-body">
-              <div className="field">
-                <label>Material name</label>
-                <input value={orderForm.materialName} onChange={(e) => setOrderForm({ ...orderForm, materialName: e.target.value })} placeholder="e.g. Calacatta Gold" />
+              <div className="row-2">
+                <div className="field">
+                  <label>Material name</label>
+                  <input value={orderForm.materialName} onChange={(e) => setOrderForm({ ...orderForm, materialName: e.target.value })} placeholder="e.g. Calacatta Gold" />
+                </div>
+                <div className="field">
+                  <label>Color</label>
+                  <input list="color-options" value={orderForm.color} onChange={(e) => setOrderForm({ ...orderForm, color: e.target.value })} placeholder="e.g. White" />
+                </div>
               </div>
               <div className="row-2">
                 <div className="field">
@@ -3342,6 +3714,19 @@ export default function SlabInventoryApp() {
               </div>
               <div className="row-2">
                 <div className="field">
+                  <label>Length (in)</label>
+                  <input type="number" value={orderForm.lengthIn} onChange={(e) => setOrderForm({ ...orderForm, lengthIn: e.target.value })} placeholder="Optional" />
+                </div>
+                <div className="field">
+                  <label>Width (in)</label>
+                  <input type="number" value={orderForm.widthIn} onChange={(e) => setOrderForm({ ...orderForm, widthIn: e.target.value })} placeholder="Optional" />
+                </div>
+              </div>
+              {orderForm.lengthIn && orderForm.widthIn && (
+                <div className="sqft-pill">{sqftOf(orderForm.lengthIn, orderForm.widthIn).toFixed(2)} sq ft per slab</div>
+              )}
+              <div className="row-2">
+                <div className="field">
                   <label>Order date</label>
                   <input type="date" value={orderForm.orderDate} onChange={(e) => setOrderForm({ ...orderForm, orderDate: e.target.value })} />
                 </div>
@@ -3354,6 +3739,19 @@ export default function SlabInventoryApp() {
                 <label>Lot # (if known)</label>
                 <input value={orderForm.lotNumber} onChange={(e) => setOrderForm({ ...orderForm, lotNumber: e.target.value })} placeholder="Optional" />
               </div>
+              <div className="row-2">
+                <div className="field">
+                  <label>Job this is for</label>
+                  <input value={orderForm.jobName} onChange={(e) => setOrderForm({ ...orderForm, jobName: e.target.value })} placeholder="Leave blank for general stock" />
+                </div>
+                <div className="field">
+                  <label>Sales order #</label>
+                  <input value={orderForm.salesOrderNumber} onChange={(e) => setOrderForm({ ...orderForm, salesOrderNumber: e.target.value })} placeholder="Optional" />
+                </div>
+              </div>
+              {orderForm.jobName && (
+                <p className="hint" style={{ margin: 0 }}>Since this is for a job, the slabs will come in already reserved for "{orderForm.jobName}" when you receive this order.</p>
+              )}
               <div className="field">
                 <label>Notes</label>
                 <textarea rows={2} value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} placeholder="Optional" />
