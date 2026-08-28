@@ -1,20 +1,12 @@
 // Recreates the window.storage API the app already uses (get/set/delete/list),
 // backed by a Supabase table instead of Claude's built-in artifact storage.
 // The app's code (App.jsx) is completely unchanged — it just calls window.storage
-// the same way it always did.
+// the same way it always did. Requests now go out with whatever auth session is
+// active, since kv_store's row-level security requires a logged-in user (see
+// supabase-setup.sql) — that's what makes the login screen a real security
+// boundary and not just a UI gate.
 
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Add them to a .env file (see .env.example) or your host's environment variables."
-  );
-}
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { supabase } from "./supabaseClient.js";
 
 async function get(key, shared = false) {
   const { data, error } = await supabase
